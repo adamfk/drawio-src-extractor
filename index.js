@@ -1,76 +1,73 @@
 let fs = require("fs");
 let acorn = require("acorn");
 let escodegen = require("escodegen");
+let beautify = require('js-beautify');
 
-let inputText = `
+fs.rmSync("./out", { recursive: true, force: true });
+fs.mkdirSync("out");
 
-function mxGraph(a, b, c, d, e) { this.mouseListeners = null; this.renderHint = c;
-    this.dialect = mxClient.IS_SVG ? mxConstants.DIALECT_SVG : c == mxConstants.RENDERING_HINT_FASTEST ? mxConstants.DIALECT_STRICTHTML : c == mxConstants.RENDERING_HINT_FASTER ? mxConstants.DIALECT_PREFERHTML : mxConstants.DIALECT_MIXEDHTML;
-    this.model = null != b ? b : new mxGraphModel;
-    this.multiplicities = [];
-    this.imageBundles = [];
-    this.cellRenderer = this.createCellRenderer();
-    this.setSelectionModel(this.createSelectionModel());
-    this.setStylesheet(null != d ? d : this.createStylesheet());
-    this.view = this.createGraphView();
-    this.view.rendering = null != e ? e : this.view.rendering;
-    this.graphModelChangeListener = mxUtils.bind(this, function(f, g) {
-      this.graphModelChanged(g.getProperty("edit").changes)
-    });
-    this.model.addListener(mxEvent.CHANGE, this.graphModelChangeListener);
-    this.createHandlers();
-    null != a && this.init(a);
-    this.view.rendering && this.view.revalidate()
-  }
-  mxLoadResources ? mxResources.add(mxClient.basePath + "/resources/graph") : mxClient.defaultBundles.push(mxClient.basePath + "/resources/graph");
-  mxGraph.prototype = new mxEventSource;mxGraph.prototype.constructor = mxGraph;  mxGraph.prototype.mouseListeners = null;
+let inputText = fs.readFileSync('in/app.min.js', 'utf8');
 
-`;
-
-inputText = fs.readFileSync('app.min.js', 'utf8');
-
-let d = acorn.parse(inputText, {ecmaVersion: 2020});
+let acornNode = acorn.parse(inputText, {ecmaVersion: 2020});
 
 let miscCount = 0;
 let currentName = "misc";
 let fileContents = "";
 
-d.body.forEach(bodyElement => {
+acornNode.body.forEach(bodyElement => {
   let name = "";
 
   if (bodyElement.type == "VariableDeclaration")
   {
-    name = bodyElement.declarations[0].id.name;
+    processVariableDeclaration(bodyElement);
+    return;
   }
   else if (bodyElement.type == "FunctionDeclaration")
   {
     name = bodyElement.id.name;
   }
-
-  if (name.startsWith("_"))
+  else if (bodyElement.type == "ExpressionStatement" && bodyElement.expression.type == 'AssignmentExpression')
   {
+    name = bodyElement.expression.left.name || name;
+  }
+
+  processElement(name, bodyElement);
+});
+
+finishWritingFileContents();
+
+/// end of processing ///
+
+
+// a variable declaration may define multiple variables like: `var a = 20, b = 55, c = 0;`
+// This function treats them all individually.
+function processVariableDeclaration(bodyElement) {
+  let decls = [];
+  decls = bodyElement.declarations;
+
+  for (let index = 0; index < decls.length; index++) {
+    const decl = decls[index];
+    // set body variable declaration to have only a single declaration and process it
+    bodyElement.declarations = [decl];
+    processElement(decl.id.name, bodyElement);
+  }
+}
+
+function processElement(name, bodyElement) {
+  if (name.startsWith("_")) {
     name = "misc";
   }
 
   let nameChanged = name && (name != currentName);
 
-  if (nameChanged)
-  {   
+  if (nameChanged) {
     finishWritingFileContents();
     currentName = name;
   }
 
   let code = escodegen.generate(bodyElement);
   fileContents += code + "\n";
-});
-
-finishWritingFileContents();
-
-console.log(d);
-
-let o = escodegen.generate(d);
-
-console.log(o);
+}
 
 function finishWritingFileContents() {
   let filename = currentName;
@@ -81,6 +78,7 @@ function finishWritingFileContents() {
   }
 
   if (fileContents) {
+    fileContents = beautify(fileContents, { indent_size: 2, space_in_empty_paren: true });
     fs.writeFileSync(`./out/${filename}.js`, fileContents);
     fileContents = "";
   }
