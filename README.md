@@ -14,3 +14,4 @@ While the functions don't have any documentation or nice variable names, it at l
 
 This script is really basic and has no tests.
 
+There are still a fair number of files in the draw.io github repo that are un-minified. These should be used when possible.
